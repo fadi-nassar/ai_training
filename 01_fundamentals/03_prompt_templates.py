@@ -7,7 +7,7 @@ load_dotenv()
 
 llm = ChatGroq(model="openai/gpt-oss-120b") #this is the model we are going to use, we can change this to any of the models we want to test.
 prompt_template = ChatPromptTemplate.from_messages([
-    ("system", "You are a helpful assistant English to {language}."),
+    ("system", "You are a helpful assistant that translates English to {language}."),
     ("human", "{text}")
 ])
 
