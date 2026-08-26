@@ -19,4 +19,5 @@ chain = prompt_template | llm | Parser # This creates a chain that first formats
 french_result = chain.invoke({"language": "French", "text": "I love programming."})
 arabic_result = chain.invoke({"language": "Arabic", "text": "I love programming."})
 print(french_result)
+
 print(arabic_result)
