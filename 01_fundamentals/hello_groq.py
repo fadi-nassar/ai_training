@@ -7,7 +7,7 @@ load_dotenv() #this is what reads the env file and get the needed variables into
 key = os.getenv("GROQ_API_KEY") #this is how we get the api key from the available enviroment variables.
 print("key loaded from env file: ", key is not None, "-start with", key[:5] if key else "N\A") #just a quick check to make sure we got the key. We don't want to print the whole key, so we just print the first 5 characters.
 
-llm = ChatGroq(model="llama-3.3-70b-versatile")
+llm = ChatGroq(model="openai/gpt-oss-120b")
 messages = ["system: You are a helpful assistant English to French. Translate the user sentence.", "user: i love programming"]
 #here we chose what llm to use, and setup a conversation between the a user and assistan the system message is a prompt that tells the assistant what to do, and the user message is the input we want to translate.
 
