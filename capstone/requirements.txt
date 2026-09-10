@@ -1,0 +1,26 @@
+# Core orchestration
+langgraph==1.2.11
+langgraph-checkpoint==4.2.0
+langgraph-prebuilt==1.1.0
+langchain==1.3.15
+langchain-core==1.5.5
+langchain-community==0.4.2
+langchain-groq==1.1.3
+langchain-huggingface==1.2.2
+langsmith==0.11.0
+
+# Agent-specific
+faiss-cpu==1.15.0
+sentence-transformers==6.0.1
+SQLAlchemy==2.0.52
+psycopg2-binary==2.9.13
+wikipedia==1.4.0
+
+# Front-end + charts
+streamlit==1.63.0
+matplotlib==3.11.1
+pandas==3.0.5
+
+# Config
+python-dotenv
+typing_extensions
