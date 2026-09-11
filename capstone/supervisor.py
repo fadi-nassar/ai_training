@@ -5,9 +5,11 @@ sys.path.append(str(Path(__file__).resolve().parent / "agents"))
 sys.path.append(str(Path(__file__).resolve().parent / "agents" / "research_team"))
 
 import os
+import json
 import time
 import logging
 import functools
+from datetime import datetime
 from dotenv import load_dotenv
 from typing_extensions import TypedDict
 from langgraph.graph import StateGraph, START, END
@@ -69,6 +71,90 @@ def resilient_agent(agent_label: str):
         return wrapper
     return decorator
 
+
+# ---------------------------------------------------------------------------
+# METRICS
+# ---------------------------------------------------------------------------
+# Per-agent-call log: response time, fallback/retry count, success/failure.
+# Kept as a simple in-memory list (shared with app.py via get_metrics()) and
+# also best-effort appended to metrics_log.jsonl next to this file. No DB.
+METRICS_LOG: list[dict] = []
+METRICS_FILE = Path(__file__).resolve().parent / "metrics_log.jsonl"
+
+
+def _record_metric(entry: dict) -> None:
+    METRICS_LOG.append(entry)
+    try:
+        with METRICS_FILE.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(entry) + "\n")
+    except OSError as exc:  # disk full / read-only dir - metrics must never break a request
+        logger.debug("Could not append to metrics file: %s", exc)
+
+
+def get_metrics() -> list[dict]:
+    """Return a copy of every agent-call metric recorded so far."""
+    return list(METRICS_LOG)
+
+
+def reset_metrics() -> None:
+    """Clear the in-memory metrics log (the .jsonl file is left as an audit trail)."""
+    METRICS_LOG.clear()
+
+
+class _RetryLogCounter(logging.Handler):
+    """Counts the 'failed (attempt ...)' warnings @resilient_agent emits, so the
+    metrics layer can see how many retries a call needed WITHOUT modifying the
+    decorator itself."""
+
+    def __init__(self) -> None:
+        super().__init__(level=logging.WARNING)
+        self.retries = 0
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            if "failed (attempt" in record.getMessage():
+                self.retries += 1
+        except Exception:  # a broken handler must not propagate
+            pass
+
+
+def record_metrics(agent_label: str):
+    """Outer decorator for the agent-calling nodes. Times the call (including any
+    retries + backoff), notes whether a fallback/retry happened, and whether the
+    call ultimately succeeded. Appends one row to METRICS_LOG. Does not alter the
+    call's return value or the retry behaviour it wraps.
+
+    NOTE: attaches a temporary handler to the module logger; fine here because the
+    supervisor routes to exactly one agent per turn (no concurrent agent calls).
+    """
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(state: "SupervisorState"):
+            counter = _RetryLogCounter()
+            logger.addHandler(counter)
+            start = time.perf_counter()
+            succeeded = False
+            try:
+                out = func(state)
+                resp = out.get("response", "") if isinstance(out, dict) else ""
+                succeeded = not resp.lstrip().startswith("[agent error]")
+                return out
+            except Exception:  # resilient_agent normally prevents this; be safe anyway
+                succeeded = False
+                raise
+            finally:
+                logger.removeHandler(counter)
+                _record_metric({
+                    "timestamp": datetime.now().isoformat(timespec="seconds"),
+                    "agent": agent_label,
+                    "duration_s": round(time.perf_counter() - start, 3),
+                    "retry_count": counter.retries,
+                    "retried": counter.retries > 0,
+                    "succeeded": succeeded,
+                })
+        return wrapper
+    return decorator
+
 # import each agent
 from agents.sql_agent import sql_agent_graph
 from agents.rag_agent import rag_agent_graph
@@ -100,17 +186,21 @@ User request: {state['user_input']}"""
     return {"category": category}
 
 # --- AGENT-CALLING NODES ---
-# Bodies are unchanged; @resilient_agent only adds retry + graceful-failure handling.
+# Bodies are unchanged. @resilient_agent adds retry + graceful failure (inner);
+# @record_metrics times the call and logs the outcome (outer, non-invasive).
+@record_metrics("SQL Query Agent")
 @resilient_agent("SQL Query Agent")
 def call_sql_agent(state: SupervisorState):
     result = sql_agent_graph.invoke({"messages": [HumanMessage(content=state["user_input"])]})
     return {"response": result["messages"][-1].content}
 
+@record_metrics("RAG Agent")
 @resilient_agent("RAG Agent")
 def call_rag_agent(state: SupervisorState):
     result = rag_agent_graph.invoke({"messages": [HumanMessage(content=state["user_input"])]})
     return {"response": result["messages"][-1].content}
 
+@record_metrics("Conversation Agent")
 @resilient_agent("Conversation Agent")
 def call_conversation_agent(state: SupervisorState):
     config = {"configurable": {"thread_id": "main-thread"}}
@@ -119,11 +209,13 @@ def call_conversation_agent(state: SupervisorState):
     )
     return {"response": result["messages"][-1].content}
 
+@record_metrics("Visualization Agent")
 @resilient_agent("Visualization Agent")
 def call_viz_agent(state: SupervisorState):
     chart = viz_assistant({"messages": [HumanMessage(content=state["user_input"])]})
     return {"response": f"Chart type: {chart.chart_type}\nTitle: {chart.title}\nLabels: {chart.labels}\nValues: {chart.values}"}
 
+@record_metrics("Web Research Team")
 @resilient_agent("Web Research Team")
 def call_research_team(state: SupervisorState):
     report = run_research_team(state["user_input"])

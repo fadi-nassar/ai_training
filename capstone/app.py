@@ -48,12 +48,12 @@ def load_system():
     Importing `supervisor` builds every agent graph (FAISS index, HF embeddings,
     DB engine, etc.), so we cache it and reuse it across reruns.
     """
-    from supervisor import main_supervisor_graph
+    from supervisor import main_supervisor_graph, get_metrics, reset_metrics
     from agents.viz_agent import viz_assistant
-    return main_supervisor_graph, viz_assistant
+    return main_supervisor_graph, viz_assistant, get_metrics, reset_metrics
 
 
-main_supervisor_graph, viz_assistant = load_system()
+main_supervisor_graph, viz_assistant, get_metrics, reset_metrics = load_system()
 
 
 def get_chart_data(user_input: str):
@@ -181,6 +181,23 @@ with st.sidebar:
         st.markdown(f"- `{cat}` → {name}")
 
     st.divider()
+    st.subheader("Metrics (session)")
+    st.caption("Per agent call, from supervisor.get_metrics().")
+    _metrics = get_metrics()
+    if _metrics:
+        _n = len(_metrics)
+        _avg_rt = sum(m["duration_s"] for m in _metrics) / _n
+        _fallbacks = sum(m["retry_count"] for m in _metrics)
+        _completion = 100.0 * sum(1 for m in _metrics if m["succeeded"]) / _n
+        _m1, _m2, _m3 = st.columns(3)
+        _m1.metric("Avg response", f"{_avg_rt:.2f}s")
+        _m2.metric("Fallbacks", _fallbacks)
+        _m3.metric("Completion", f"{_completion:.0f}%")
+        st.caption(f"{_n} agent call(s) recorded this session")
+    else:
+        st.write("_No agent calls yet._")
+
+    st.divider()
     st.subheader("Observability")
     tracing_on = os.getenv("LANGSMITH_TRACING", "").strip().lower() == "true"
     project = os.getenv("LANGSMITH_PROJECT") or os.getenv("LANGCHAIN_PROJECT") or "(default)"
@@ -188,7 +205,8 @@ with st.sidebar:
     st.write(f"Project: `{project}`")
 
     st.divider()
-    if st.button("Clear conversation", use_container_width=True):
+    if st.button("Clear conversation & metrics", use_container_width=True):
         st.session_state.history = []
         st.session_state.routing_log = []
+        reset_metrics()  # clears the in-memory list; metrics_log.jsonl is kept
         st.rerun()

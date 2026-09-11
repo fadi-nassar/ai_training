@@ -65,6 +65,17 @@ Routing and classification logic are untouched — the decorator only adds the
 safety net. Each attempt is still a separate child run in LangSmith, so failures
 stay visible.
 
+### Metrics
+
+A second, outer decorator `@record_metrics(...)` logs one row per agent call:
+`duration_s` (wall-clock, including any retry + backoff), `retry_count`
+(failed attempts seen), `retried`, and `succeeded`. Rows go to an in-memory
+list (`supervisor.get_metrics()`) and are best-effort appended to
+`capstone/metrics_log.jsonl`. The Streamlit sidebar shows session
+**avg response time**, **fallback count**, and **completion rate** from this.
+It does not modify `@resilient_agent` — retry counts are read from that
+decorator's warning logs.
+
 ---
 
 ## Project layout
@@ -74,6 +85,7 @@ capstone/
 ├── supervisor.py            # entry point: builds & compiles main_supervisor_graph
 ├── app.py                   # Streamlit chat front-end
 ├── verify_tracing.py        # LangSmith end-to-end tracing check
+├── metrics_log.jsonl        # per-agent-call metrics (generated, git-ignored)
 ├── .env                     # secrets & config (not committed)
 ├── requirements.txt
 └── agents/
